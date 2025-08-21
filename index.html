@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>MarketPlace — объявления</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="page">
+<header class="header header--glass">
+  <div class="container nav-wrap">
+    <nav class="nav">
+      <a class="nav__brand" href="index.html">MarketPlace</a>
+      <div class="nav__links">
+        <a href="#" class="active" data-view="feed">Лента</a>
+        <a href="#" data-view="fav">Избранное</a>
+        <a href="#" data-view="post" class="muted" title="Недоступно">Разместить</a>
+        <span class="divider"></span>
+        <span class="balance" id="balance">Баланс: —</span>
+        <span class="user" id="username">—</span>
+        <a id="logoutBtn" class="btn btn--ghost" href="javascript:void(0)">Выйти</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main class="container">
+  <section id="view-feed" class="view card card--soft reveal">
+    <h2>Объявления</h2>
+    <div id="feed" class="grid grid--3"></div>
+  </section>
+
+  <section id="view-fav" class="view card card--soft reveal" hidden>
+    <h2>Избранное</h2>
+    <div id="favList" class="grid grid--3"></div>
+  </section>
+
+  <section id="view-post" class="view card card--soft reveal" hidden>
+    <h2>Мои объявления</h2>
+    <div id="myAds" class="grid grid--2"></div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="container footer__grid">
+    <div class="footer__brand">© 2025 MarketPlace</div>
+    <div class="footer__links">
+      <a href="#" data-view="feed">Лента</a>
+      <a href="#" data-view="fav">Избранное</a>
+      <a href="#" data-view="post">Разместить</a>
+    </div>
+  </div>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<!-- Модальное окно входа/регистрации -->
+<div id="auth" class="modal" hidden>
+  <div class="modal__box card">
+    <h2>Вход или регистрация</h2>
+    <div class="grid" style="grid-template-columns:1fr 1fr; gap:14px">
+      <div>
+        <label class="lbl">Логин</label>
+        <input id="authLogin" class="inp" autocomplete="username" spellcheck="false">
+      </div>
+      <div>
+        <label class="lbl">Пароль</label>
+        <input id="authPass" class="inp" type="password" autocomplete="current-password">
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="btnSignIn">Войти</button>
+      <button class="btn btn--ghost" id="btnSignUp">Зарегистрироваться</button>
+    </div>
+  </div>
+</div>
+
+<!-- Победная модалка -->
+<div id="win" class="win" hidden>
+  <div class="win__box card" style="text-align:center">
+    <h2>Молодец! Ты взломал сайт №2 🎉</h2>
+    <p>Покупка совершена по изменённой цене.</p>
+    <button class="btn" onclick="closeWin()">Ок</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+  initStore();                   // инициализация БД
+  guardOnIndex();                // если нет сессии — показать модалку
+  mountUI();                     // первичная отрисовка
+
+  document.querySelectorAll('[data-view]').forEach(a=>{
+    a.addEventListener('click', (e)=>{
+      e.preventDefault();
+      const v = a.getAttribute('data-view');
+      showView(v);
+    });
+  });
+
+  document.getElementById('logoutBtn').onclick = ()=>{
+    logout();
+    location.reload();
+  };
+
+  // модалка логин/регистрация
+  const auth = document.getElementById('auth');
+  document.getElementById('btnSignIn').onclick = async ()=>{
+    const u = authLogin.value.trim();
+    const p = authPass.value;
+    const ok = await login(u, p);
+    if(ok){ auth.hidden = true; mountUI(); } else { toast('Неверные данные'); }
+  };
+  document.getElementById('btnSignUp').onclick = async ()=>{
+    const u = authLogin.value.trim();
+    const p = authPass.value;
+    const ok = await signup(u, p);
+    if(ok){ auth.hidden = true; mountUI(); } else { toast('Такой логин уже есть'); }
+  };
+
+  // Enter = войти
+  document.getElementById('authPass').addEventListener('keydown', e=>{
+    if(e.key==='Enter') document.getElementById('btnSignIn').click();
+  });
+
+  // если цена менялась (после «взлома») — перечерчиваем
+  window.addEventListener('focus', mountUI);
+</script>
+</body>
+</html>
