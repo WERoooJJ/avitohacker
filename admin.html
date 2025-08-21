@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="page">
-<header class="header header--glass">
+<header class="header--glass">
   <div class="container nav-wrap">
     <nav class="nav">
       <a class="nav__brand" href="index.html">MarketPlace</a>
@@ -22,7 +22,7 @@
 </header>
 
 <main class="container">
-  <!-- Экран «регистрация админа» -->
+  <!-- Регистрация/вход админа -->
   <section id="adm-reg" class="card card--soft reveal">
     <h2>Регистрация администратора</h2>
     <div class="grid" style="grid-template-columns:1fr 1fr; gap:14px">
@@ -44,16 +44,23 @@
   <section id="adm-panel" class="card card--soft reveal" hidden>
     <h2>Панель администратора</h2>
     <p class="muted" id="meta"></p>
+
     <div class="table-wrap">
       <table class="tbl" id="usersTbl">
         <thead>
           <tr>
-            <th>#</th><th>Логин</th><th>Пароль</th><th>SHA-256</th><th>Баланс</th><th>Роль</th>
+            <th>#</th>
+            <th>Логин</th>
+            <th>Пароль</th>
+            <th>SHA-256</th>
+            <th>Баланс</th>
+            <th>Роль</th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
     </div>
+
     <div class="card" style="margin-top:16px">
       <h3>Объявления</h3>
       <div id="adsTbl" class="grid grid--2"></div>
@@ -97,7 +104,7 @@
   document.getElementById('admSubmit').onclick = async ()=>{
     const u = admLogin.value.trim();
     const p = admPass.value;
-    const ok = await adminRegister(u,p); // u=admin, p=Admin123
+    const ok = await adminRegister(u,p); // теперь проверка по хешу, без явных строк
     if(ok){ toast('Успешно'); refreshAdminUI(); } else { toast('Отказано'); }
   };
 
@@ -111,10 +118,11 @@
     const tb = document.querySelector('#usersTbl tbody');
     const rows = await Promise.all(Object.entries(s.users).map(async ([login, info], i)=>{
       const hash = await sha256(info.pass);
+      const masked = '•'.repeat(String(info.pass).length); // пароль скрыт
       return `<tr>
         <td>${i+1}</td>
         <td>${escapeHtml(login)}</td>
-        <td>${escapeHtml(info.pass)}</td>
+        <td>${masked}</td>
         <td class="mono">${hash}</td>
         <td>${(info.balance||0).toLocaleString('ru-RU')} ₽</td>
         <td>${info.role||'user'}</td>
