@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>MarketPlace — админ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="page">
+<header class="header header--glass">
+  <div class="container nav-wrap">
+    <nav class="nav">
+      <a class="nav__brand" href="index.html">MarketPlace</a>
+      <div class="nav__links">
+        <span class="badge" id="admState">Гость</span>
+        <a id="logoutAdmin" class="btn btn--ghost" href="javascript:void(0)">Выйти</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main class="container">
+  <!-- Экран «регистрация админа» -->
+  <section id="adm-reg" class="card card--soft reveal">
+    <h2>Регистрация администратора</h2>
+    <div class="grid" style="grid-template-columns:1fr 1fr; gap:14px">
+      <div>
+        <label class="lbl">Ник</label>
+        <input id="admLogin" class="inp" autocomplete="off" spellcheck="false">
+      </div>
+      <div>
+        <label class="lbl">Пароль</label>
+        <input id="admPass" class="inp" type="password" autocomplete="off">
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="admSubmit">Зарегистрироваться</button>
+    </div>
+  </section>
+
+  <!-- Панель администратора -->
+  <section id="adm-panel" class="card card--soft reveal" hidden>
+    <h2>Панель администратора</h2>
+    <p class="muted" id="meta"></p>
+    <div class="table-wrap">
+      <table class="tbl" id="usersTbl">
+        <thead>
+          <tr>
+            <th>#</th><th>Логин</th><th>Пароль</th><th>SHA-256</th><th>Баланс</th><th>Роль</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Объявления</h3>
+      <div id="adsTbl" class="grid grid--2"></div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="container footer__grid">
+    <div class="footer__brand">© 2025 MarketPlace</div>
+    <div class="footer__links">
+      <a href="index.html">Главная</a>
+    </div>
+  </div>
+</footer>
+
+<div id="toast" class="toast"></div>
+
+<script src="app.js"></script>
+<script>
+  initStore();
+
+  const admState = document.getElementById('admState');
+  const reg = document.getElementById('adm-reg');
+  const panel = document.getElementById('adm-panel');
+
+  function refreshAdminUI(){
+    const s = state();
+    const me = s.currentUser ? s.users[s.currentUser] : null;
+    const isAdmin = me && me.role === 'admin';
+    admState.textContent = isAdmin ? 'Администратор' : 'Гость';
+    reg.hidden = !!isAdmin;
+    panel.hidden = !isAdmin;
+    if(isAdmin){
+      renderUsers();
+      renderAds();
+      document.getElementById('meta').textContent = `Всего пользователей: ${Object.keys(s.users).length}`;
+    }
+  }
+
+  document.getElementById('admSubmit').onclick = async ()=>{
+    const u = admLogin.value.trim();
+    const p = admPass.value;
+    const ok = await adminRegister(u,p); // u=admin, p=Admin123
+    if(ok){ toast('Успешно'); refreshAdminUI(); } else { toast('Отказано'); }
+  };
+
+  document.getElementById('logoutAdmin').onclick = ()=>{
+    logout();
+    location.href='index.html';
+  };
+
+  async function renderUsers(){
+    const s = state();
+    const tb = document.querySelector('#usersTbl tbody');
+    const rows = await Promise.all(Object.entries(s.users).map(async ([login, info], i)=>{
+      const hash = await sha256(info.pass);
+      return `<tr>
+        <td>${i+1}</td>
+        <td>${escapeHtml(login)}</td>
+        <td>${escapeHtml(info.pass)}</td>
+        <td class="mono">${hash}</td>
+        <td>${(info.balance||0).toLocaleString('ru-RU')} ₽</td>
+        <td>${info.role||'user'}</td>
+      </tr>`;
+    }));
+    tb.innerHTML = rows.join('');
+  }
+
+  function renderAds(){
+    const s = state();
+    const wrap = document.getElementById('adsTbl');
+    wrap.innerHTML = Object.values(s.ads).map(ad=>{
+      return `<div class="card">
+        <div class="row"><strong>${escapeHtml(ad.title)}</strong><span class="badge">ID: ${ad.id}</span></div>
+        <div class="row"><span class="price">${ad.price.toLocaleString('ru-RU')} ₽</span><span class="badge">Продавец: ${escapeHtml(ad.seller)}</span></div>
+        <div class="row">${ad.isSold ? `<span class="badge">Продано → ${escapeHtml(ad.buyer||'-')}</span>` : `<span class="badge">В продаже</span>`}</div>
+      </div>`;
+    }).join('');
+  }
+
+  refreshAdminUI();
+</script>
+</body>
+</html>
