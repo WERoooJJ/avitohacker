@@ -1,6 +1,10 @@
+/* ===========================
+   MarketPlace — app.js (V5)
+   =========================== */
+
 // ===== localStorage wrapper =====
 const LS = {
-  get k(){ return 'FA_APP_STATE_V4'; }, // bump версия: сбросит старое состояние
+  get k(){ return 'FA_APP_STATE_V5'; }, // bump версия, чтобы обновить базу после правок
   load(){ try{ return JSON.parse(localStorage.getItem(this.k)) ?? null }catch{ return null } },
   save(s){ localStorage.setItem(this.k, JSON.stringify(s)) }
 };
@@ -19,11 +23,26 @@ function toast(msg){
 function escapeHtml(s=''){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
 
-// SHA-256 для админ-таблицы
+// SHA-256 (hex) — используется и в админке, и для скрытой проверки админа
 async function sha256(str){
   const enc = new TextEncoder().encode(str);
   const buf = await crypto.subtle.digest('SHA-256', enc);
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// ===== анти-брутфорс =====
+const MAX_ATTEMPTS = 5;                 // неверных попыток до блокировки
+const BASE_COOLDOWN_MS = 60_000;        // 1 минута
+const MAX_COOLDOWN_MS  = 15*60_000;     // до 15 минут
+
+// ===== скрытая проверка логина/пароля админа (в коде нет явных значений) =====
+// Проверяем SHA-256 от строки "<login>:<password>:<salt>"
+const ADMIN_SALT = 'A71!x9_zz';
+const ADMIN_EXPECTED_SHA256 = '9f75bfb92d74a34e5198c012a4d1279c6ae6b2c46e2f7b2021545c4b39346acf';
+async function verifyAdminCredentials(login, pass){
+  const material = `${login}:${pass}:${ADMIN_SALT}`;
+  const sum = await sha256(material);
+  return sum === ADMIN_EXPECTED_SHA256;
 }
 
 // ===== init store =====
@@ -41,16 +60,37 @@ function initStore(){
   const makePass = ()=>{
     const pool='ABCDEFGHJKLMNPQRSTUVWXabcdefghijkmnpqrstuvwx23456789';
     let p=''; for(let i=0;i<10;i++) p+=pool[Math.floor(Math.random()*pool.length)];
-    return p.replace(/^(.{2})/,'Ip');
+    return p.replace(/^(.{2})/,'Ip'); // чуть «правдоподобней»
   };
 
   const users = {};
   names.forEach(n=>{
-    users[n] = { pass: makePass(), balance: randInt(10_000, 5_000_000), favs: [], role:'user' };
+    users[n] = {
+      pass: makePass(),
+      balance: randInt(10_000, 5_000_000),
+      favs: [],
+      role:'user',
+      attempts:0,
+      lockedUntil:0,
+      _cooldown: BASE_COOLDOWN_MS
+    };
   });
 
-  users['Hacker']   = { pass: '123',                 balance: 1_200_000, favs: [1], role:'user' };
-  users['Vladimir'] = { pass: 'GaGaVladik55782pass', balance: 0,         favs: [],  role:'user' };
+  // ключевые аккаунты
+  users['Hacker'] = {
+    pass:'123',
+    balance:1_200_000,
+    favs:[1],
+    role:'user',
+    attempts:0, lockedUntil:0, _cooldown:BASE_COOLDOWN_MS
+  };
+  users['Vladimir'] = {
+    pass:'GaGaVladik55782pass',
+    balance:0,
+    favs:[],
+    role:'user',
+    attempts:0, lockedUntil:0, _cooldown:BASE_COOLDOWN_MS
+  };
 
   const ads = {
     1: { id:1, title:'Лифтбек, 3.0 AT', desc:'Состояние отличное. Без ДТП. ПТС оригинал.',
@@ -68,14 +108,53 @@ function guardOnIndex(){
   if(!s?.currentUser && modal){ modal.hidden = false; }
 }
 
+function safeUpdateHeader(){
+  const s = state(); if(!s) return;
+  const user = s.users[s.currentUser]; if(!user) return;
+  const uName = document.getElementById('username');
+  const bal   = document.getElementById('balance');
+  if(uName) uName.textContent = s.currentUser;
+  if(bal)   bal.textContent   = 'Баланс: ' + rub(user.balance);
+}
+
 async function login(u,p){
-  const s = state(); const user = s.users[u];
-  if(!user || user.pass !== p) return false;
-  // сбросить прошлую админскую роль
+  const s = state();
+  const user = s.users[u];
+  if(!user){ toast('Неверные данные'); return false; }
+
+  // анти-брутфорс: блокировка по времени
+  const now = Date.now();
+  if(user.lockedUntil && now < user.lockedUntil){
+    const sec = Math.ceil((user.lockedUntil - now)/1000);
+    toast(`Аккаунт временно заблокирован. Повтори через ${sec}с`);
+    return false;
+  }
+
+  if(user.pass !== p){
+    user.attempts = (user.attempts || 0) + 1;
+    if(user.attempts >= MAX_ATTEMPTS){
+      const next = Math.min((user._cooldown || BASE_COOLDOWN_MS) * 2, MAX_COOLDOWN_MS);
+      user._cooldown   = next;
+      user.lockedUntil = now + next;
+      user.attempts    = 0;
+      LS.save(s);
+      toast(`Слишком много попыток. Блокировка на ${Math.round(next/60000)} мин`);
+      return false;
+    }
+    LS.save(s);
+    toast('Неверные данные');
+    return false;
+  }
+
+  // успех
+  user.attempts = 0;
+  user.lockedUntil = 0;
+  user._cooldown = BASE_COOLDOWN_MS;
+
+  // сбросить прошлую админскую роль (если была у другого пользователя)
   Object.values(s.users).forEach(x=>{ if(x.role==='admin') x.role='user'; });
   s.currentUser = u;
   LS.save(s);
-  // сразу обновить хедер после логина
   safeUpdateHeader();
   return true;
 }
@@ -84,7 +163,10 @@ async function signup(u,p){
   const s = state();
   if(!u || !p) return false;
   if(s.users[u]) return false;
-  s.users[u] = { pass:p, balance: randInt(50_000, 500_000), favs: [], role:'user' };
+  s.users[u] = {
+    pass:p, balance: randInt(50_000, 500_000), favs: [],
+    role:'user', attempts:0, lockedUntil:0, _cooldown:BASE_COOLDOWN_MS
+  };
   s.currentUser = u; LS.save(s);
   safeUpdateHeader();
   return true;
@@ -92,13 +174,16 @@ async function signup(u,p){
 
 async function adminRegister(u,p){
   const s = state();
-  if(u==='admin' && p==='Admin123'){
+  if(await verifyAdminCredentials(u,p)){
     s.admin.isActive = true;
     if(s.currentUser){
       s.users[s.currentUser].role = 'admin';
     }else{
-      s.users['admin'] = { pass:'Admin123', balance:0, favs: [], role:'admin' };
-      s.currentUser = 'admin';
+      s.users[u] = s.users[u] || {
+        pass:p, balance:0, favs:[], role:'admin', attempts:0, lockedUntil:0, _cooldown:BASE_COOLDOWN_MS
+      };
+      s.users[u].role = 'admin';
+      s.currentUser = u;
     }
     LS.save(s);
     safeUpdateHeader();
@@ -113,16 +198,7 @@ function logout(){
   s.currentUser = null; LS.save(s);
 }
 
-// ===== header/view helpers =====
-function safeUpdateHeader(){
-  const s = state(); if(!s) return;
-  const user = s.users[s.currentUser]; if(!user) return;
-  const uName = document.getElementById('username');
-  const bal   = document.getElementById('balance');
-  if(uName) uName.textContent = s.currentUser;
-  if(bal)   bal.textContent   = 'Баланс: ' + rub(user.balance);
-}
-
+// ===== views =====
 function showView(name){
   document.querySelectorAll('.view').forEach(v => v.hidden = true);
   const el = document.getElementById('view-'+name); if(el) el.hidden=false;
@@ -197,7 +273,7 @@ function renderMyAds(){
 function toggleFav(id){
   const s = state(); const me = s.currentUser; const favs = new Set(s.users[me]?.favs||[]);
   favs.has(id) ? favs.delete(id) : favs.add(id); s.users[me].favs=[...favs]; LS.save(s);
-  toast('Обновлено избранное'); safeUpdateHeader(); // и хедер на всякий
+  toast('Обновлено избранное'); safeUpdateHeader();
 }
 function buyAd(id){
   const s = state(); const me = s.currentUser; const u = s.users[me]; const ad = s.ads[id];
@@ -205,7 +281,7 @@ function buyAd(id){
   if(u.balance < ad.price) return toast('Недостаточно средств');
   u.balance -= ad.price; ad.isSold=true; ad.buyer=me; LS.save(s);
   safeUpdateHeader();
-  openWin(); // показываем модалку только тут
+  openWin();
 }
 function editPrice(id){
   const s = state(); const me = s.currentUser; const ad = s.ads[id];
@@ -222,7 +298,6 @@ function openWin(){
   const w=document.getElementById('win');
   if(!w) return;
   w.hidden=false;
-  // Esc и клик по фону — закрывают
   function onKey(e){ if(e.key==='Escape') closeWin(); }
   function onClick(e){ if(e.target===w) closeWin(); }
   w._escHandler = onKey; w._clickHandler = onClick;
@@ -236,3 +311,18 @@ function closeWin(){
   if(w._escHandler){ document.removeEventListener('keydown', w._escHandler); w._escHandler=null; }
   if(w._clickHandler){ w.removeEventListener('click', w._clickHandler); w._clickHandler=null; }
 }
+
+// ===== expose (глобально для HTML-скриптов) =====
+window.initStore = initStore;
+window.guardOnIndex = guardOnIndex;
+window.mountUI = mountUI;
+window.showView = showView;
+window.login = login;
+window.signup = signup;
+window.logout = logout;
+window.adminRegister = adminRegister;
+window.state = state;
+window.sha256 = sha256;
+window.escapeHtml = escapeHtml;
+window.openWin = openWin;
+window.closeWin = closeWin;
